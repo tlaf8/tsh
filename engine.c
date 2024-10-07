@@ -60,27 +60,29 @@ void destroy(Node **head) {
     *head = NULL;
 }
 
-void update_variable(Node **head, const char *key, char *value) {
+void update_variable(Node **head, const char *var_name, char *value) {
+    if (*head == NULL) {
+        append(head, var_name, value);
+        return;
+    }
+
     for (Node *curr = *head; curr != NULL; curr = curr->next) {
-        if (strcmp(curr->key, key) == 0) {
+        if (strcmp(curr->key, var_name) == 0) {
             curr->value = value;
         } else {
-            append(head, key, value);
+            append(head, var_name, value);
+            return;
         }
     }
 }
 
-char *variable_lookup(const Node **head, const char *key) {
+char *variable_lookup(Node **head, const char *key) {
     for (const Node *curr = *head; curr != NULL; curr = curr->next) {
         if (strcmp(curr->key, key) == 0) {
             return curr->value;
         }
     }
     return NULL;
-}
-
-void assign_var(Node **head, const char *command, char *params[]) {
-    // TODO
 }
 
 int normalize_executable(char **command) {
@@ -128,6 +130,62 @@ int normalize_executable(char **command) {
         }
         free(path);
         return FALSE;
+    }
+}
+
+void assign_variable(Node **head, const char *var_name, char *params[]) {
+    char *sub_command = params[2];
+
+    int num_params = 0;
+    for (int i = 2; params[i++] != NULL; num_params++) {}
+
+    char *sub_params[num_params + 1];
+    for(int i = 2; params[i] != NULL; i++) {
+        sub_params[i - 2] = params[i];
+    }
+    sub_params[num_params] = NULL;
+    normalize_executable(&sub_command);
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        perror("Pipe creation failed");
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("Forking failed");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        return;
+    }
+
+    if (pid == 0) {
+        close(pipe_fd[0]);
+        dup2(pipe_fd[1], STDOUT_FILENO);
+        close(pipe_fd[1]);
+
+        if (execve(sub_command, sub_params, NULL) == -1) {
+            perror("Execve failed in variable assignment");
+            return;
+        }
+    } else {
+        close(pipe_fd[1]);
+        wait(NULL);
+        char buffer[4096];
+        ssize_t bytes = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
+        if (bytes < 0) {
+            perror("Sub command read failed");
+            close(pipe_fd[0]);
+            return;
+        }
+        buffer[bytes] = '\0';
+
+        char *output = strdup(buffer);
+        if (output != NULL) {
+            output[strcspn(output, "\n")] = '\0';
+            update_variable(head, var_name, output);
+        }
     }
 }
 
@@ -180,12 +238,22 @@ int main(const int argc, char *argv[]) {
         // * Organize tokens into command parameters
         char *command = tokens[0]->value;
         char *params[numtokens];
+
         int assign = -1, var = -1, pipe = -1, redir = -1;
         for (int i = 0; i < numtokens; i++) {
             if (tokens[i]->type == TOKEN_ASSIGN) { assign = 1; }
-            if (tokens[i]->type == TOKEN_VAR) { var = 1; }
             if (tokens[i]->type == TOKEN_PIPE) { pipe = 1; }
             if (tokens[i]->type == TOKEN_REDIR) { redir = 1; }
+            if (tokens[i]->type == TOKEN_VAR) {
+                char *expanded = variable_lookup(&head, tokens[i]->value);
+                if (expanded == NULL) {
+                    perror("Unknown variable");
+                    return -4;
+                } else {
+                    params[i] = expanded;
+                    continue;
+                }
+            }
             params[i] = tokens[i]->value;
         }
         params[numtokens] = NULL;
@@ -198,23 +266,20 @@ int main(const int argc, char *argv[]) {
 
         // * Handle variable assignments
         if (assign > 0) {
-            // TODO: Handle variable assignment
-        } else if (var > 0) {
-            // TODO: Handle variable expansion;
+            assign_variable(&head, command, params);
         } else {
+            // * Fork and execute commands
+            // Maybe TODO?
             normalize_executable(&command);
+            if (fork() != 0) {
+                wait(0);
+            } else {
+                if (execve(command, params, NULL) == -1) {
+                    perror("Error executing command");
+                    exit(EXIT_FAILURE);
+                }
+            }
         }
-
-        // * Fork and execute commands
-        // Maybe TODO?
-         if (fork() != 0) {
-             wait(0);
-         } else {
-             if (execve(command, params, NULL) == -1) {
-                 perror("Error executing command");
-                 exit(EXIT_FAILURE);
-             }
-         }
 
         // Free tokens vector
         for (int ii = 0; ii < numtokens; ii++) {
