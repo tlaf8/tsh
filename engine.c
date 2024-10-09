@@ -73,9 +73,9 @@ int main(const int argc, char *argv[]) {
 
         int assign = -1, pipe = -1, redir = -1;
         for (int i = 0; i < numtokens; i++) {
-            if (tokens[i]->type == TOKEN_ASSIGN) { assign = 1; }
-            if (tokens[i]->type == TOKEN_PIPE) { pipe = 1; }
-            if (tokens[i]->type == TOKEN_REDIR) { redir = 1; }
+            assign = tokens[i]->type == TOKEN_ASSIGN ? 1 : assign;
+            pipe = tokens[i]->type == TOKEN_PIPE ? 1 : pipe;
+            redir = tokens[i]->type == TOKEN_REDIR ? 1 : redir;
             if (tokens[i]->type == TOKEN_VAR) {
                 char *expanded = variable_lookup(&head, tokens[i]->value);
                 if (expanded == NULL) {
