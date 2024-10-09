@@ -1,7 +1,7 @@
 .PHONY: all
 all: engine.out
 
-engine.out: engine.c parser.c parser.h
+engine.out: engine.c parser.c
 	gcc -Wall -g -o $@ $^
 
 .PHONY: clean
